@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   Build,
   BuildStatus,
+  BuildQueryOrder,
 } from "azure-devops-node-api/interfaces/BuildInterfaces.js";
 import type { IConnectionProvider } from "../connection/provider.js";
 import { withErrorHandling, jsonResponse, dryRunResponse, structuredResponse, toIso } from "../utils/tool-response.js";
@@ -17,6 +18,15 @@ const BUILD_STATUS_MAP: Record<string, BuildStatus> = {
   postponed: BuildStatus.Postponed,
   notStarted: BuildStatus.NotStarted,
   none: BuildStatus.None,
+};
+
+const BUILD_QUERY_ORDER_MAP: Record<string, BuildQueryOrder> = {
+  finishTimeAscending: BuildQueryOrder.FinishTimeAscending,
+  finishTimeDescending: BuildQueryOrder.FinishTimeDescending,
+  queueTimeAscending: BuildQueryOrder.QueueTimeAscending,
+  queueTimeDescending: BuildQueryOrder.QueueTimeDescending,
+  startTimeAscending: BuildQueryOrder.StartTimeAscending,
+  startTimeDescending: BuildQueryOrder.StartTimeDescending,
 };
 
 // Typed-results first wave. Every field optional — server version differences
@@ -51,6 +61,10 @@ const getBuildOutput = {
 const listBuildsOutput = {
   count: z.number().describe("Number of builds returned"),
   items: z.array(buildSummary),
+  continuationToken: z
+    .string()
+    .optional()
+    .describe("Token for retrieving the next page"),
 };
 
 export function registerPipelineTools(server: McpServer, provider: IConnectionProvider): void {
@@ -189,7 +203,7 @@ export function registerPipelineTools(server: McpServer, provider: IConnectionPr
   server.registerTool(
     "list_builds",
     {
-      description: "List recent builds with optional filters",
+      description: "List recent builds with optional filters. Use queryOrder to make the ordering explicit and continuationToken to retrieve subsequent pages.",
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         definitionId: z
@@ -208,14 +222,28 @@ export function registerPipelineTools(server: McpServer, provider: IConnectionPr
           ])
           .optional()
           .describe("Build status filter"),
+        queryOrder: z
+          .enum([
+            "finishTimeAscending",
+            "finishTimeDescending",
+            "queueTimeAscending",
+            "queueTimeDescending",
+            "startTimeAscending",
+            "startTimeDescending",
+          ])
+          .optional()
+          .describe("Order in which builds are returned"),
         top: topParam(10),
+        continuationToken: z
+          .string()
+          .optional()
+          .describe("Token returned by a previous call to retrieve the next page"),
       },
       outputSchema: listBuildsOutput,
     },
-    ({ definitionId, status, top }) =>
+    ({ definitionId, status, queryOrder, top, continuationToken }) =>
       withErrorHandling(async () => {
         const { api, project } = await provider.getBuildContext();
-
 
         const builds = await api.getBuilds(
           project,
@@ -230,7 +258,11 @@ export function registerPipelineTools(server: McpServer, provider: IConnectionPr
           undefined,
           undefined,
           undefined,
-          top
+          top,
+          continuationToken,
+          undefined,
+          undefined,
+          queryOrder ? BUILD_QUERY_ORDER_MAP[queryOrder] : undefined
         );
 
         const result = (builds || []).map((build) => ({
@@ -245,7 +277,14 @@ export function registerPipelineTools(server: McpServer, provider: IConnectionPr
           finishTime: toIso(build.finishTime),
         }));
 
-        return structuredResponse({ count: result.length, items: result }, result);
+        return structuredResponse(
+          {
+            count: result.length,
+            items: result,
+            continuationToken: builds?.continuationToken,
+          },
+          result
+        );
       })
   );
 

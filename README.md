@@ -430,7 +430,7 @@ Restart the client. All 48 tools appear in the tool picker. Server name is auto-
 | `list_build_definitions` | List pipeline definitions | `name`, `top` |
 | `queue_build` | Trigger a build | `definitionId`, `sourceBranch`, `parameters` |
 | `get_build` | Get build status | `buildId` |
-| `list_builds` | List recent builds | `definitionId`, `status`, `top` |
+| `list_builds` | List recent builds | `definitionId`, `status`, `queryOrder`, `top`, `continuationToken` |
 | `list_releases` | List releases | `definitionId`, `top` |
 
 ### Core (1 tool, always registered)
